@@ -50,6 +50,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "dbgcnt.h"
 
 static int reload_cse_noop_set_p (rtx);
+static int postreload_pseudo_p_1 (rtx *, void *);
+static bool postreload_insn_has_pseudo_p (rtx);
 static void reload_cse_simplify (rtx, rtx);
 static void reload_cse_regs_1 (rtx);
 static int reload_cse_simplify_set (rtx, rtx);
@@ -84,11 +86,31 @@ reload_cse_noop_set_p (rtx set)
   return rtx_equal_for_cselib_p (SET_DEST (set), SET_SRC (set));
 }
 
+/* Postreload assumes all pseudos have been eliminated.  Some targets still
+   leave target-specific pseudos in a few insns, e.g. literal-pool-backed
+   switch table bases.  Skip those insns rather than crashing while trying to
+   treat them as ordinary hard-reg-only postreload candidates.  */
+static int
+postreload_pseudo_p_1 (rtx *loc, void *data ATTRIBUTE_UNUSED)
+{
+  return REG_P (*loc) && REGNO (*loc) >= FIRST_PSEUDO_REGISTER;
+}
+
+static bool
+postreload_insn_has_pseudo_p (rtx insn)
+{
+  return INSN_P (insn) && for_each_rtx (&PATTERN (insn), postreload_pseudo_p_1,
+					NULL);
+}
+
 /* Try to simplify INSN.  */
 static void
 reload_cse_simplify (rtx insn, rtx testreg)
 {
   rtx body = PATTERN (insn);
+
+  if (postreload_insn_has_pseudo_p (insn))
+    return;
 
   if (GET_CODE (body) == SET)
     {
@@ -967,7 +989,8 @@ reload_combine (void)
 	      reg_state[i].use_index = -1;
 	}
 
-      reload_combine_note_use (&PATTERN (insn), insn);
+      if (!postreload_insn_has_pseudo_p (insn))
+	reload_combine_note_use (&PATTERN (insn), insn);
       for (note = REG_NOTES (insn); note; note = XEXP (note, 1))
 	{
 	  if (REG_NOTE_KIND (note) == REG_INC
@@ -1584,6 +1607,11 @@ gate_handle_postreload (void)
 static unsigned int
 rest_of_handle_postreload (void)
 {
+#ifdef TARGET_DISABLE_POSTRELOAD_CSE
+  if (TARGET_DISABLE_POSTRELOAD_CSE)
+    return 0;
+#endif
+
   if (!dbg_cnt (postreload_cse))
     return 0;
 

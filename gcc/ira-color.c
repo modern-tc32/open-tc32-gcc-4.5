@@ -2723,8 +2723,9 @@ ira_mark_allocation_change (int regno)
 {
   ira_allocno_t a = ira_regno_allocno_map[regno];
   int old_hard_regno, hard_regno, cost;
+  if (a == NULL)
+    return;
   enum reg_class cover_class = ALLOCNO_COVER_CLASS (a);
-
   ira_assert (a != NULL);
   hard_regno = reg_renumber[regno];
   if ((old_hard_regno = ALLOCNO_HARD_REGNO (a)) == hard_regno)
@@ -2882,6 +2883,8 @@ ira_reassign_pseudos (int *spilled_pseudo_regs, int num,
       gcc_assert (reg_renumber[regno] < 0);
       a = ira_regno_allocno_map[regno];
       ira_mark_allocation_change (regno);
+      if (a == NULL)
+	continue;
       ira_assert (reg_renumber[regno] < 0);
       if (internal_flag_ira_verbose > 3 && ira_dump_file != NULL)
 	fprintf (ira_dump_file,
@@ -2912,6 +2915,8 @@ ira_reassign_pseudos (int *spilled_pseudo_regs, int num,
     {
       regno = spilled_pseudo_regs[i];
       a = ira_regno_allocno_map[regno];
+      if (a == NULL)
+	continue;
       FOR_EACH_ALLOCNO_CONFLICT (a, conflict_a, aci)
 	if (ALLOCNO_HARD_REGNO (conflict_a) < 0
 	    && ! ALLOCNO_DONT_REASSIGN_P (conflict_a)
@@ -2970,7 +2975,9 @@ ira_reuse_stack_slot (int regno, unsigned int inherent_size,
 
   ira_assert (inherent_size == PSEUDO_REGNO_BYTES (regno)
 	      && inherent_size <= total_size
-	      && ALLOCNO_HARD_REGNO (allocno) < 0);
+	      && (allocno == NULL || ALLOCNO_HARD_REGNO (allocno) < 0));
+  if (allocno == NULL)
+    return NULL_RTX;
   if (! flag_ira_share_spill_slots)
     return NULL_RTX;
   slot_num = -ALLOCNO_HARD_REGNO (allocno) - 2;
@@ -3082,6 +3089,8 @@ ira_mark_new_stack_slot (rtx x, int regno, unsigned int total_size)
 
   ira_assert (PSEUDO_REGNO_BYTES (regno) <= total_size);
   allocno = ira_regno_allocno_map[regno];
+  if (allocno == NULL)
+    return;
   slot_num = -ALLOCNO_HARD_REGNO (allocno) - 2;
   if (slot_num == -1)
     {
@@ -3128,6 +3137,8 @@ calculate_spill_cost (int *regnos, rtx in, rtx out, rtx insn,
       hard_regno = reg_renumber[regno];
       ira_assert (hard_regno >= 0);
       a = ira_regno_allocno_map[regno];
+      if (a == NULL)
+	continue;
       length += ALLOCNO_EXCESS_PRESSURE_POINTS_NUM (a);
       cost += ALLOCNO_MEMORY_COST (a) - ALLOCNO_COVER_CLASS_COST (a);
       nregs = hard_regno_nregs[hard_regno][ALLOCNO_MODE (a)];

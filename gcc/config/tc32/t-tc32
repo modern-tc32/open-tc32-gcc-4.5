@@ -1,0 +1,4 @@
+LIB1ASMSRC = tc32/tc32-lib1funcs.S
+LIB1ASMFUNCS = _thumb1_case_sqi _thumb1_case_uqi _thumb1_case_shi \
+	_thumb1_case_uhi _thumb1_case_si
+TARGET_LIBGCC2_CFLAGS += -O2

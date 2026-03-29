@@ -1733,6 +1733,7 @@ LSYM(Lchange_\register):
 	pop	{r1}
 	bx	lr
 	SIZE (__gnu_thumb1_case_sqi)
+	FUNC_ALIAS _gnu_thumb1_case_sqi __gnu_thumb1_case_sqi
 #endif
 
 #ifdef L_thumb1_case_uqi
@@ -1752,6 +1753,7 @@ LSYM(Lchange_\register):
 	pop	{r1}
 	bx	lr
 	SIZE (__gnu_thumb1_case_uqi)
+	FUNC_ALIAS _gnu_thumb1_case_uqi __gnu_thumb1_case_uqi
 #endif
 
 #ifdef L_thumb1_case_shi
@@ -1772,6 +1774,7 @@ LSYM(Lchange_\register):
 	pop	{r0, r1}
 	bx	lr
 	SIZE (__gnu_thumb1_case_shi)
+	FUNC_ALIAS _gnu_thumb1_case_shi __gnu_thumb1_case_shi
 #endif
 
 #ifdef L_thumb1_case_uhi
@@ -1792,6 +1795,7 @@ LSYM(Lchange_\register):
 	pop	{r0, r1}
 	bx	lr
 	SIZE (__gnu_thumb1_case_uhi)
+	FUNC_ALIAS _gnu_thumb1_case_uhi __gnu_thumb1_case_uhi
 #endif
 
 #ifdef L_thumb1_case_si
@@ -1808,11 +1812,13 @@ LSYM(Lchange_\register):
 	lsls	r0, r0, #2
 	lsls	r1, r1, #2
 	ldr	r0, [r1, r0]
-	adds	r0, r0, r1
+	/* tc32 emits absolute 32-bit jump-table entries, so do not add the
+	   table base here.  */
 	mov	lr, r0
 	pop	{r0, r1}
 	mov	pc, lr		/* We know we were called from thumb code.  */
 	SIZE (__gnu_thumb1_case_si)
+	FUNC_ALIAS _gnu_thumb1_case_si __gnu_thumb1_case_si
 #endif
 
 #endif /* Arch supports thumb.  */

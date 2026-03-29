@@ -1134,11 +1134,17 @@ compile_file (void)
   if (!flag_no_ident)
     {
       const char *pkg_version = "(GNU) ";
+      const char *target_version = version_string;
 
       if (strcmp ("(GCC) ", pkgversion_string))
 	pkg_version = pkgversion_string;
+      if (!strcmp (TARGET_NAME, "tc32-elf"))
+	{
+	  pkg_version = "(Telink TC32 version 2.0 build) ";
+	  target_version = "4.5.1.tc32-elf-1.5";
+	}
       fprintf (asm_out_file, "%s\"GCC: %s%s\"\n",
-	       IDENT_ASM_OP, pkg_version, version_string);
+	       IDENT_ASM_OP, pkg_version, target_version);
     }
 #endif
 

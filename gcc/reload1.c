@@ -1412,6 +1412,20 @@ reload (rtx first, int global)
     }
 
   /* Indicate that we no longer have known memory locations or constants.  */
+#ifdef TARGET_DISABLE_POSTRELOAD_CSE
+  if (!TARGET_DISABLE_POSTRELOAD_CSE)
+    {
+      if (reg_equiv_constant)
+        free (reg_equiv_constant);
+      if (reg_equiv_invariant)
+        free (reg_equiv_invariant);
+      reg_equiv_constant = 0;
+      reg_equiv_invariant = 0;
+    }
+  VEC_free (rtx, gc, reg_equiv_memory_loc_vec);
+  reg_equiv_memory_loc_vec = 0;
+  reg_equiv_memory_loc = 0;
+#else
   if (reg_equiv_constant)
     free (reg_equiv_constant);
   if (reg_equiv_invariant)
@@ -1419,7 +1433,9 @@ reload (rtx first, int global)
   reg_equiv_constant = 0;
   reg_equiv_invariant = 0;
   VEC_free (rtx, gc, reg_equiv_memory_loc_vec);
+  reg_equiv_memory_loc_vec = 0;
   reg_equiv_memory_loc = 0;
+#endif
 
   free (temp_pseudo_reg_arr);
 

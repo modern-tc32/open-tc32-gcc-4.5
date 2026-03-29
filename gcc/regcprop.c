@@ -101,11 +101,29 @@ static bool replace_oldest_value_addr (rtx *, enum reg_class,
 				       enum machine_mode, rtx,
 				       struct value_data *);
 static bool replace_oldest_value_mem (rtx, rtx, struct value_data *);
+static int hardreg_copyprop_pseudo_p_1 (rtx *, void *);
+static bool hardreg_copyprop_insn_has_pseudo_p (rtx);
 static bool copyprop_hardreg_forward_1 (basic_block, struct value_data *);
 extern void debug_value_data (struct value_data *);
 #ifdef ENABLE_CHECKING
 static void validate_value_data (struct value_data *);
 #endif
+
+/* This pass only tracks hard-register values.  If a target still has
+   residual pseudos after reload, skip those insns rather than treating
+   them as hard-reg-only candidates.  */
+static int
+hardreg_copyprop_pseudo_p_1 (rtx *loc, void *data ATTRIBUTE_UNUSED)
+{
+  return REG_P (*loc) && REGNO (*loc) >= FIRST_PSEUDO_REGISTER;
+}
+
+static bool
+hardreg_copyprop_insn_has_pseudo_p (rtx insn)
+{
+  return NONDEBUG_INSN_P (insn)
+	 && for_each_rtx (&PATTERN (insn), hardreg_copyprop_pseudo_p_1, NULL);
+}
 
 /* Free all queued updates for DEBUG_INSNs that change some reg to
    register REGNO.  */
@@ -757,12 +775,21 @@ copyprop_hardreg_forward_1 (basic_block bb, struct value_data *vd)
 
 	  if (insn == BB_END (bb))
 	    break;
-	  else
-	    continue;
-	}
+	      else
+		continue;
+	    }
 
-      set = single_set (insn);
-      extract_insn (insn);
+	  if (hardreg_copyprop_insn_has_pseudo_p (insn))
+	    {
+	      note_stores (PATTERN (insn), kill_set_value, vd);
+	      if (insn == BB_END (bb))
+		break;
+	      else
+		continue;
+	    }
+
+	      set = single_set (insn);
+	      extract_insn (insn);
       if (! constrain_operands (1))
 	fatal_insn_not_found (insn);
       preprocess_constraints ();
@@ -1162,6 +1189,11 @@ validate_value_data (struct value_data *vd)
 static bool
 gate_handle_cprop (void)
 {
+#ifdef TARGET_DISABLE_POSTRELOAD_CSE
+  if (TARGET_DISABLE_POSTRELOAD_CSE)
+    return false;
+#endif
+
   return (optimize > 0 && (flag_cprop_registers));
 }
 

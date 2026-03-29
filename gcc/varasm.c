@@ -1841,13 +1841,22 @@ assemble_end_function (tree decl, const char *fnname ATTRIBUTE_UNUSED)
   /* We could have switched section in the middle of the function.  */
   if (flag_reorder_blocks_and_partition)
     switch_to_section (function_section (decl));
+#ifndef ASM_DECLARE_FUNCTION_SIZE_AFTER_POOL
   ASM_DECLARE_FUNCTION_SIZE (asm_out_file, fnname, decl);
+#endif
 #endif
   if (! CONSTANT_POOL_BEFORE_FUNCTION)
     {
       output_constant_pool (fnname, decl);
       switch_to_section (function_section (decl)); /* need to switch back */
     }
+#ifdef ASM_DECLARE_FUNCTION_SIZE
+#ifdef ASM_DECLARE_FUNCTION_SIZE_AFTER_POOL
+  if (flag_reorder_blocks_and_partition)
+    switch_to_section (function_section (decl));
+  ASM_DECLARE_FUNCTION_SIZE (asm_out_file, fnname, decl);
+#endif
+#endif
   /* Output labels for end of hot/cold text sections (to be used by
      debug info.)  */
   if (flag_reorder_blocks_and_partition)
@@ -3966,8 +3975,12 @@ output_constant_pool_contents (struct rtx_constant_pool *pool)
 	  place_block_symbol (desc->sym);
 	else
 	  {
-	    switch_to_section (targetm.asm_out.select_rtx_section
-			       (desc->mode, desc->constant, desc->align));
+	    if (current_function_decl != NULL_TREE)
+	      switch_to_section (targetm.asm_out.function_rodata_section
+				 (current_function_decl));
+	    else
+	      switch_to_section (targetm.asm_out.select_rtx_section
+				 (desc->mode, desc->constant, desc->align));
 	    output_constant_pool_1 (desc, desc->align);
 	  }
       }

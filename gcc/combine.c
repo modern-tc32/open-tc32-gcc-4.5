@@ -663,6 +663,28 @@ do_SUBST (rtx *into, rtx newval)
 {
   struct undo *buf;
   rtx oldval = *into;
+  enum machine_mode oldmode;
+
+  if (GET_CODE (oldval) == SUBREG
+      && CONST_INT_P (SUBREG_REG (oldval)))
+    {
+      oldmode = GET_MODE (oldval);
+      oldval = simplify_subreg (oldmode, SUBREG_REG (oldval),
+                                GET_MODE (SUBREG_REG (oldval)),
+                                SUBREG_BYTE (oldval));
+      gcc_assert (oldval);
+      *into = oldval;
+    }
+  else if (GET_CODE (oldval) == ZERO_EXTEND
+           && CONST_INT_P (XEXP (oldval, 0)))
+    {
+      oldmode = GET_MODE (oldval);
+      oldval = simplify_unary_operation (ZERO_EXTEND, oldmode,
+                                         XEXP (oldval, 0),
+                                         GET_MODE (XEXP (oldval, 0)));
+      gcc_assert (oldval);
+      *into = oldval;
+    }
 
   if (oldval == newval)
     return;
@@ -675,10 +697,15 @@ do_SUBST (rtx *into, rtx newval)
   if (GET_MODE_CLASS (GET_MODE (oldval)) == MODE_INT
       && CONST_INT_P (newval))
     {
+      HOST_WIDE_INT trunc = trunc_int_for_mode (INTVAL (newval),
+                                                GET_MODE (oldval));
+
+      if (INTVAL (newval) != trunc)
+        newval = GEN_INT (trunc);
+
       /* Sanity check that we're replacing oldval with a CONST_INT
 	 that is a valid sign-extension for the original mode.  */
-      gcc_assert (INTVAL (newval)
-		  == trunc_int_for_mode (INTVAL (newval), GET_MODE (oldval)));
+      gcc_assert (INTVAL (newval) == trunc);
 
       /* Replacing the operand of a SUBREG or a ZERO_EXTEND with a
 	 CONST_INT is not valid, because after the replacement, the

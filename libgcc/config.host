@@ -219,6 +219,9 @@ arm*-*-rtems*)
 	;;
 arm*-*-elf)
 	;;
+tc32-*-elf)
+	cpu_type=tc32
+	;;
 arm*-wince-pe*)
 	;;
 arm-*-pe*)

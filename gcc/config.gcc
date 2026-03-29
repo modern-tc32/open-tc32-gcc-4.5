@@ -810,6 +810,11 @@ arm*-*-elf)
 	tmake_file="arm/t-arm arm/t-arm-elf"
 	tmake_file="${tmake_file} arm/t-arm-softfp soft-fp/t-softfp"
 	;;
+tc32-*-elf)
+	cpu_type=tc32
+	tm_file="dbxelf.h elfos.h newlib-stdint.h tc32/tc32.h"
+	tmake_file="tc32/t-tc32"
+	;;
 arm*-wince-pe*)
 	tm_file="arm/semi.h arm/aout.h arm/arm.h arm/coff.h dbxcoff.h arm/pe.h arm/wince-pe.h"
 	tmake_file="arm/t-arm arm/t-wince-pe"

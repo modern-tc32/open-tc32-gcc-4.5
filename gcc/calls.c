@@ -1884,11 +1884,12 @@ avoid_likely_spilled_reg (rtx x)
 
   if (REG_P (x)
       && HARD_REGISTER_P (x)
-      && CLASS_LIKELY_SPILLED_P (REGNO_REG_CLASS (REGNO (x))))
+      && (CLASS_LIKELY_SPILLED_P (REGNO_REG_CLASS (REGNO (x)))
+          || FUNCTION_VALUE_REGNO_P (REGNO (x))))
     {
       /* Make sure that we generate a REG rather than a CONCAT.
-	 Moves into CONCATs can need nontrivial instructions,
-	 and the whole point of this function is to avoid
+         Moves into CONCATs can need nontrivial instructions,
+         and the whole point of this function is to avoid
 	 using the hard register directly in such a situation.  */
       generating_concat_p = 0;
       new_rtx = gen_reg_rtx (GET_MODE (x));

@@ -2580,8 +2580,118 @@ final_scan_insn (rtx insn, FILE *file, int optimize ATTRIBUTE_UNUSED,
 	    print_rtx_head = "";
 	  }
 
-	if (! constrain_operands_cached (1))
-	  fatal_insn_not_found (insn);
+#ifdef TARGET_DISABLE_POSTRELOAD_CSE
+	if (TARGET_DISABLE_POSTRELOAD_CSE)
+	  {
+	    rtx set = single_set (insn);
+	    bool tc32_rerecog = false;
+
+	    if (set && REG_P (SET_SRC (set))
+		&& (REGNO (SET_SRC (set)) == FRAME_POINTER_REGNUM
+		    || REGNO (SET_SRC (set)) == ARG_POINTER_REGNUM))
+	      {
+		int from = REGNO (SET_SRC (set));
+		int base = (frame_pointer_needed
+			    ? HARD_FRAME_POINTER_REGNUM
+			    : STACK_POINTER_REGNUM);
+		HOST_WIDE_INT offset;
+
+		INITIAL_ELIMINATION_OFFSET (from, base, offset);
+		if (offset == 0)
+		  {
+		    SET_SRC (set) = gen_rtx_REG (GET_MODE (SET_SRC (set)), base);
+		    tc32_rerecog = true;
+		  }
+	      }
+
+		    if (set && !MEM_P (SET_DEST (set))
+			&& REG_P (SET_SRC (set))
+			&& REGNO (SET_SRC (set)) >= FIRST_PSEUDO_REGISTER
+			&& reg_renumber[REGNO (SET_SRC (set))] < 0)
+	      {
+		unsigned regno = REGNO (SET_SRC (set));
+
+		if (reg_equiv_constant != 0
+		    && reg_equiv_constant[regno] != 0)
+		  {
+		    SET_SRC (set) = reg_equiv_constant[regno];
+		    tc32_rerecog = true;
+		  }
+		else if (reg_equiv_mem != 0
+			 && reg_equiv_mem[regno] != 0)
+		  {
+		    SET_SRC (set) = reg_equiv_mem[regno];
+		    tc32_rerecog = true;
+		  }
+		else if (reg_equiv_memory_loc != 0
+			 && reg_equiv_memory_loc[regno] != 0)
+		  {
+		    rtx mem = eliminate_regs (reg_equiv_memory_loc[regno],
+					      VOIDmode, NULL_RTX);
+		    if (GET_CODE (mem) == MEM)
+		      {
+			SET_SRC (set) = mem;
+			tc32_rerecog = true;
+		      }
+		  }
+	      }
+
+	    if (set && GET_CODE (SET_SRC (set)) == PLUS)
+	      {
+		rtx plus = SET_SRC (set);
+		int i;
+
+		for (i = 0; i < 2; ++i)
+		  {
+		    rtx op = XEXP (plus, i);
+
+		    if (REG_P (op)
+			&& REGNO (op) >= FIRST_PSEUDO_REGISTER
+			&& reg_renumber[REGNO (op)] < 0)
+		      {
+			unsigned regno = REGNO (op);
+			rtx repl = 0;
+
+			if (reg_equiv_constant != 0
+			    && reg_equiv_constant[regno] != 0)
+			  repl = reg_equiv_constant[regno];
+			else if (reg_equiv_mem != 0
+				 && reg_equiv_mem[regno] != 0)
+			  repl = reg_equiv_mem[regno];
+			else if (reg_equiv_memory_loc != 0
+				 && reg_equiv_memory_loc[regno] != 0)
+			  repl = eliminate_regs (reg_equiv_memory_loc[regno],
+						 VOIDmode, NULL_RTX);
+
+			if (repl != 0)
+			  {
+			    XEXP (plus, i) = repl;
+			    tc32_rerecog = true;
+			  }
+		      }
+		  }
+	      }
+
+	    /* TC32 reload alters operands late enough that stale INSN_CODE /
+	       alternative selection can survive into final, producing illegal
+	       asm like tmov reg, [mem].  Re-recognize before constraining.  */
+	    INSN_CODE (insn) = -1;
+	    insn_code_number = recog_memoized (insn);
+	    if (tc32_rerecog)
+	      cleanup_subreg_operands (insn);
+	  }
+#endif
+
+		if (insn_code_number < 0)
+		  {
+		    INSN_CODE (insn) = -1;
+		    insn_code_number = recog_memoized (insn);
+		    if (insn_code_number < 0)
+		      fatal_insn_not_found (insn);
+		  }
+
+		if (! constrain_operands_cached (1))
+		  fatal_insn_not_found (insn);
 
 	/* Some target machines need to prescan each insn before
 	   it is output.  */

@@ -295,6 +295,7 @@ case $basic_machine in
 	| sparc | sparc64 | sparc64b | sparc64v | sparc86x | sparclet | sparclite \
 	| sparcv8 | sparcv9 | sparcv9b | sparcv9v \
 	| spu | strongarm \
+	| tc32 \
 	| tahoe | thumb | tic4x | tic54x | tic55x | tic6x | tic80 | tron \
 	| ubicom32 \
 	| v850 | v850e \

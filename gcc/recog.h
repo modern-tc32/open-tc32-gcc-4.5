@@ -248,7 +248,12 @@ extern struct operand_alternative recog_op_alt[MAX_RECOG_OPERANDS][MAX_RECOG_ALT
 
 typedef int (*insn_operand_predicate_fn) (rtx, enum machine_mode);
 typedef const char * (*insn_output_fn) (rtx *, rtx);
-typedef rtx (*insn_gen_fn) (rtx, ...);
+/* GCC 4.5 calls generated insn creators through GEN_FCN/insn_data.genfun.
+   On modern arm64 Darwin hosts, routing fixed-arity gen_* functions through
+   a variadic function pointer corrupts arguments at the call site.  Keep the
+   callback type unprototyped so the historical generator interface remains
+   callable on this host.  */
+typedef rtx (*insn_gen_fn) ();
 
 struct insn_operand_data
 {
