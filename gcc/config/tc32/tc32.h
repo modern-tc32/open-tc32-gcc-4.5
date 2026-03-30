@@ -276,8 +276,10 @@ extern const char *tc32_output_movsi (rtx *);
 extern const char *tc32_output_movhi (rtx *);
 extern const char *tc32_output_movqi (rtx *);
 extern const char *tc32_output_addsi3 (rtx *);
+extern const char *tc32_output_addsi3_sp_reg (rtx *);
 extern const char *tc32_output_addsi3_special_neg_mem (rtx *);
 extern const char *tc32_output_subsi3 (rtx *);
+extern const char *tc32_output_subsi3_sp_reg (rtx *);
 extern const char *tc32_output_addsi3_symbol (rtx *);
 extern const char *tc32_output_subsi3_symbol (rtx *);
 extern const char *tc32_output_cbranch (rtx, int, int);
@@ -394,6 +396,10 @@ extern void thumb1_output_function_prologue (FILE *, HOST_WIDE_INT);
 #define CASE_VECTOR_MODE SImode
 #define MAX_REGS_PER_ADDRESS 2
 #define SLOW_BYTE_ACCESS 0
+
+/* Match Thumb-1 heuristics: branches are not free, so generic optimizers
+   should not over-prefer branch-heavy shapes in large control-flow regions. */
+#define BRANCH_COST(speed_p, predictable_p) (optimize > 0 ? 2 : 0)
 #define TRAMPOLINE_SIZE 0
 #define TRAMPOLINE_ALIGNMENT 32
 #define TARGET_DISABLE_POSTRELOAD_CSE 1

@@ -65,6 +65,7 @@ static inline int thumb1_rtx_costs (rtx, enum rtx_code, enum rtx_code);
 static int number_of_first_bit_set (unsigned);
 static bool tc32_has_call_insn (void);
 static bool tc32_simple_leaf_function_p (void);
+static unsigned int tc32_current_function_approx_size (void);
 static bool tc32_real_frame_pointer_needed (void);
 static bool tc32_hard_frame_pointer_available_p (void);
 static int tc32_frame_access_base_regno (void);
@@ -120,8 +121,10 @@ const char *tc32_output_movsi_low_from_special (rtx *);
 const char *tc32_output_movhi (rtx *);
 const char *tc32_output_movqi (rtx *);
 const char *tc32_output_addsi3 (rtx *);
+const char *tc32_output_addsi3_sp_reg (rtx *);
 const char *tc32_output_addsi3_special_neg_mem (rtx *);
 const char *tc32_output_subsi3 (rtx *);
+const char *tc32_output_subsi3_sp_reg (rtx *);
 const char *tc32_output_addsi3_symbol (rtx *);
 const char *tc32_output_subsi3_symbol (rtx *);
 const char *tc32_output_cbranch (rtx, int, int);
@@ -169,6 +172,10 @@ static int tc32_arg_words (enum machine_mode, tree);
 #define TARGET_RTX_COSTS tc32_rtx_costs
 #undef TARGET_ADDRESS_COST
 #define TARGET_ADDRESS_COST tc32_address_cost
+#undef TARGET_MIN_ANCHOR_OFFSET
+#define TARGET_MIN_ANCHOR_OFFSET 0
+#undef TARGET_MAX_ANCHOR_OFFSET
+#define TARGET_MAX_ANCHOR_OFFSET 127
 struct gcc_target targetm = TARGET_INITIALIZER;
 
 static struct tc32_stack_offsets current_frame_offsets;
@@ -213,11 +220,9 @@ tc32_override_options (void)
      spill slots until the allocator interaction is understood.  */
   flag_ira_share_spill_slots = 0;
 
-  /* tree-switch-conversion materializes CSWTCH.* table bases in pseudos that
-     still survive into hard-reg-only late RTL passes on tc32.  Until tc32 can
-     legally lower those symbolic pseudos after reload, keep this transform
-     disabled.  */
-  flag_tree_switch_conversion = 0;
+  /* Allow tree-level switch conversion for dense lookup tables.  Jump-table
+     dispatch itself remains disabled separately below.  */
+  flag_tree_switch_conversion = 1;
 
   /* Late hard-register copy propagation can also resurrect pseudo values
      after reload on tc32, which then reach final through plain movsi
@@ -285,6 +290,19 @@ tc32_has_incoming_stack_args_p (void)
   return (crtl->args.pretend_args_size != 0
           || (crtl->args.size >= 0
               && crtl->args.size > ((LAST_ARG_REGNUM + 1) * UNITS_PER_WORD)));
+}
+
+static unsigned int
+tc32_current_function_approx_size (void)
+{
+  rtx insn;
+  unsigned int total = 0;
+
+  for (insn = get_insns (); insn; insn = NEXT_INSN (insn))
+    if (INSN_P (insn) || CALL_P (insn) || JUMP_P (insn))
+      total += get_attr_length (insn);
+
+  return total;
 }
 
 static bool
@@ -1410,7 +1428,10 @@ thumb1_legitimate_address_p (enum machine_mode mode, rtx x, int strict_p)
 
   else if (GET_CODE (x) == PLUS)
     {
-      if (thumb1_index_register_rtx_p (XEXP (x, 0), strict_p)
+      if (GET_MODE_SIZE (mode) <= 4
+          && XEXP (x, 0) != frame_pointer_rtx
+          && XEXP (x, 1) != frame_pointer_rtx
+          && thumb1_index_register_rtx_p (XEXP (x, 0), strict_p)
           && thumb1_index_register_rtx_p (XEXP (x, 1), strict_p))
         return 1;
 
@@ -1436,7 +1457,7 @@ thumb1_legitimate_address_p (enum machine_mode mode, rtx x, int strict_p)
                        && REGNO (XEXP (x, 0)) <= LAST_VIRTUAL_REGISTER))
                && GET_MODE_SIZE (mode) >= 4
                && GET_CODE (XEXP (x, 1)) == CONST_INT
-               && thumb_legitimate_offset_p (mode, INTVAL (XEXP (x, 1))))
+               && (INTVAL (XEXP (x, 1)) & 3) == 0)
         return 1;
     }
 
@@ -2476,6 +2497,22 @@ tc32_output_movsi (rtx *operands)
     {
       rtx addr = XEXP (operands[1], 0);
 
+      if (tc32_constant_pool_ref_p (addr))
+        {
+          /* Large functions can place GCC's constant-pool entries outside the
+             direct PC-relative tloadr range.  Keep the compact form for small
+             functions, but fall back to explicit address materialization once
+             the function body becomes large enough to hit assembler overflows.  */
+          if (tc32_hi_reg_p (operands[0])
+              || tc32_current_function_approx_size () > 512)
+            {
+              tc32_emit_lowreg_load ("tloadr\t%0, %1", operands[0], operands[1]);
+              return "";
+            }
+
+          return "tloadr\t%0, %1";
+        }
+
       if (GET_CODE (addr) == SYMBOL_REF
           || GET_CODE (addr) == LABEL_REF
           || GET_CODE (addr) == CONST)
@@ -2764,6 +2801,50 @@ tc32_output_movsi_low_from_special (rtx *operands)
 const char *
 tc32_output_movhi (rtx *operands)
 {
+  rtx dst = operands[0];
+  rtx src = operands[1];
+
+  if (GET_CODE (dst) == SUBREG)
+    dst = SUBREG_REG (dst);
+
+  if (GET_CODE (src) == SUBREG)
+    src = SUBREG_REG (src);
+
+  if (REG_P (dst) && REG_P (src)
+      && (REGNO (src) == ARG_POINTER_REGNUM
+          || REGNO (src) == FRAME_POINTER_REGNUM
+          || REGNO (src) == STACK_POINTER_REGNUM
+          || (REGNO (src) == HARD_FRAME_POINTER_REGNUM
+              && !tc32_hard_frame_pointer_available_p ())))
+    {
+      rtx move_ops[2];
+
+      move_ops[0] = gen_rtx_REG (SImode, REGNO (dst));
+      move_ops[1] = gen_rtx_REG (SImode, REGNO (src));
+
+      if (REGNO (dst) <= LAST_LO_REGNUM)
+        return tc32_output_movsi_low_from_special (move_ops);
+
+      return tc32_output_movsi_core_from_special (move_ops);
+    }
+
+  if (GET_CODE (operands[0]) == MEM
+      && REG_P (src)
+      && (REGNO (src) == ARG_POINTER_REGNUM
+          || REGNO (src) == FRAME_POINTER_REGNUM
+          || REGNO (src) == STACK_POINTER_REGNUM
+          || (REGNO (src) == HARD_FRAME_POINTER_REGNUM
+              && !tc32_hard_frame_pointer_available_p ())))
+    {
+      rtx scratch = tc32_choose_low_scratch (-1, -1);
+      rtx move_ops[2];
+
+      move_ops[0] = scratch;
+      move_ops[1] = gen_rtx_REG (SImode, REGNO (src));
+      tc32_output_movsi_low_from_special (move_ops);
+      operands[1] = gen_lowpart (HImode, scratch);
+    }
+
   if (GET_CODE (operands[0]) == REG
       && which_alternative == 2
       && GET_CODE (operands[1]) == MEM)
@@ -2907,6 +2988,50 @@ tc32_output_movhi (rtx *operands)
 const char *
 tc32_output_movqi (rtx *operands)
 {
+  rtx dst = operands[0];
+  rtx src = operands[1];
+
+  if (GET_CODE (dst) == SUBREG)
+    dst = SUBREG_REG (dst);
+
+  if (GET_CODE (src) == SUBREG)
+    src = SUBREG_REG (src);
+
+  if (REG_P (dst) && REG_P (src)
+      && (REGNO (src) == ARG_POINTER_REGNUM
+          || REGNO (src) == FRAME_POINTER_REGNUM
+          || REGNO (src) == STACK_POINTER_REGNUM
+          || (REGNO (src) == HARD_FRAME_POINTER_REGNUM
+              && !tc32_hard_frame_pointer_available_p ())))
+    {
+      rtx move_ops[2];
+
+      move_ops[0] = gen_rtx_REG (SImode, REGNO (dst));
+      move_ops[1] = gen_rtx_REG (SImode, REGNO (src));
+
+      if (REGNO (dst) <= LAST_LO_REGNUM)
+        return tc32_output_movsi_low_from_special (move_ops);
+
+      return tc32_output_movsi_core_from_special (move_ops);
+    }
+
+  if (GET_CODE (operands[0]) == MEM
+      && REG_P (src)
+      && (REGNO (src) == ARG_POINTER_REGNUM
+          || REGNO (src) == FRAME_POINTER_REGNUM
+          || REGNO (src) == STACK_POINTER_REGNUM
+          || (REGNO (src) == HARD_FRAME_POINTER_REGNUM
+              && !tc32_hard_frame_pointer_available_p ())))
+    {
+      rtx scratch = tc32_choose_low_scratch (-1, -1);
+      rtx move_ops[2];
+
+      move_ops[0] = scratch;
+      move_ops[1] = gen_rtx_REG (SImode, REGNO (src));
+      tc32_output_movsi_low_from_special (move_ops);
+      operands[1] = gen_lowpart (QImode, scratch);
+    }
+
   if (GET_CODE (operands[0]) == REG
       && which_alternative == 2
       && GET_CODE (operands[1]) == MEM)
@@ -3281,6 +3406,51 @@ finish:
 }
 
 const char *
+tc32_output_addsi3_sp_reg (rtx *operands)
+{
+  rtx dst = tc32_strip_subreg (operands[0]);
+  rtx src2 = tc32_strip_subreg (operands[2]);
+  rtx tmp = src2;
+  rtx ops[2];
+  rtx alu_ops[3];
+  rtx saved_tmp = NULL_RTX;
+
+  gcc_assert (REG_P (dst) && REG_P (src2));
+
+  if (REGNO (dst) == REGNO (src2))
+    {
+      tmp = tc32_choose_low_scratch (REGNO (dst), -1);
+      if (!tc32_reg_dead_here_p (REGNO (tmp)))
+        {
+          saved_tmp = tmp;
+          ops[0] = tmp;
+          output_asm_insn ("tpush\t{%0}", ops);
+        }
+
+      ops[0] = tmp;
+      ops[1] = src2;
+      output_asm_insn ("tmov\t%0, %1", ops);
+    }
+
+  ops[0] = dst;
+  ops[1] = stack_pointer_rtx;
+  tc32_output_movsi_low_from_special (ops);
+
+  alu_ops[0] = dst;
+  alu_ops[1] = dst;
+  alu_ops[2] = tmp;
+  output_asm_insn ("tadd\t%0, %1, %2", alu_ops);
+
+  if (saved_tmp)
+    {
+      ops[0] = saved_tmp;
+      output_asm_insn ("tpop\t{%0}", ops);
+    }
+
+  return "";
+}
+
+const char *
 tc32_output_addsi3_special_neg_mem (rtx *operands)
 {
   static const int scratch_order[] = { 3, 2, 1, 0, 4, 5, 6 };
@@ -3354,16 +3524,76 @@ tc32_output_addsi3_special_neg_mem (rtx *operands)
 const char *
 tc32_output_addsi3_symbol (rtx *operands)
 {
-  tc32_emit_const_literal_load (operands[0], operands[2]);
-  output_asm_insn ("tadd\t%0, %0, %1", operands);
+  rtx dst = tc32_strip_subreg (operands[0]);
+  rtx src1 = tc32_strip_subreg (operands[1]);
+  rtx tmp = dst;
+  rtx saved_tmp = NULL_RTX;
+  rtx ops[2];
+  rtx alu_ops[3];
+
+  gcc_assert (REG_P (dst) && REG_P (src1));
+
+  if (REGNO (dst) == REGNO (src1))
+    {
+      tmp = tc32_choose_low_scratch (REGNO (dst), -1);
+      if (!tc32_reg_dead_here_p (REGNO (tmp)))
+        {
+          saved_tmp = tmp;
+          ops[0] = tmp;
+          output_asm_insn ("tpush\t{%0}", ops);
+        }
+    }
+
+  tc32_emit_const_literal_load (tmp, operands[2]);
+
+  alu_ops[0] = dst;
+  alu_ops[1] = src1;
+  alu_ops[2] = tmp;
+  output_asm_insn ("tadd\t%0, %1, %2", alu_ops);
+
+  if (saved_tmp)
+    {
+      ops[0] = saved_tmp;
+      output_asm_insn ("tpop\t{%0}", ops);
+    }
   return "";
 }
 
 const char *
 tc32_output_subsi3_symbol (rtx *operands)
 {
-  tc32_emit_const_literal_load (operands[0], operands[2]);
-  output_asm_insn ("tsub\t%0, %1, %0", operands);
+  rtx dst = tc32_strip_subreg (operands[0]);
+  rtx src1 = tc32_strip_subreg (operands[1]);
+  rtx tmp = dst;
+  rtx saved_tmp = NULL_RTX;
+  rtx ops[2];
+  rtx alu_ops[3];
+
+  gcc_assert (REG_P (dst) && REG_P (src1));
+
+  if (REGNO (dst) == REGNO (src1))
+    {
+      tmp = tc32_choose_low_scratch (REGNO (dst), -1);
+      if (!tc32_reg_dead_here_p (REGNO (tmp)))
+        {
+          saved_tmp = tmp;
+          ops[0] = tmp;
+          output_asm_insn ("tpush\t{%0}", ops);
+        }
+    }
+
+  tc32_emit_const_literal_load (tmp, operands[2]);
+
+  alu_ops[0] = dst;
+  alu_ops[1] = src1;
+  alu_ops[2] = tmp;
+  output_asm_insn ("tsub\t%0, %1, %2", alu_ops);
+
+  if (saved_tmp)
+    {
+      ops[0] = saved_tmp;
+      output_asm_insn ("tpop\t{%0}", ops);
+    }
   return "";
 }
 
@@ -3557,6 +3787,51 @@ tc32_output_subsi3 (rtx *operands)
     }
 
   return "tsub\t%0, %1, %2";
+}
+
+const char *
+tc32_output_subsi3_sp_reg (rtx *operands)
+{
+  rtx dst = tc32_strip_subreg (operands[0]);
+  rtx src2 = tc32_strip_subreg (operands[2]);
+  rtx tmp = src2;
+  rtx ops[2];
+  rtx alu_ops[3];
+  rtx saved_tmp = NULL_RTX;
+
+  gcc_assert (REG_P (dst) && REG_P (src2));
+
+  if (REGNO (dst) == REGNO (src2))
+    {
+      tmp = tc32_choose_low_scratch (REGNO (dst), -1);
+      if (!tc32_reg_dead_here_p (REGNO (tmp)))
+        {
+          saved_tmp = tmp;
+          ops[0] = tmp;
+          output_asm_insn ("tpush\t{%0}", ops);
+        }
+
+      ops[0] = tmp;
+      ops[1] = src2;
+      output_asm_insn ("tmov\t%0, %1", ops);
+    }
+
+  ops[0] = dst;
+  ops[1] = stack_pointer_rtx;
+  tc32_output_movsi_low_from_special (ops);
+
+  alu_ops[0] = dst;
+  alu_ops[1] = dst;
+  alu_ops[2] = tmp;
+  output_asm_insn ("tsub\t%0, %1, %2", alu_ops);
+
+  if (saved_tmp)
+    {
+      ops[0] = saved_tmp;
+      output_asm_insn ("tpop\t{%0}", ops);
+    }
+
+  return "";
 }
 
 void
